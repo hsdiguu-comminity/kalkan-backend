@@ -24,7 +24,23 @@ tools-service/          Güvenlik araçları servisi (Python + FastAPI)
 
 ## Kurulum
 
-Henüz yapılmadı – `package.json`, `tsconfig.json` ve Python bağımlılıkları ekip tarafından eklenecek.
+Canlı destek bağlantı altyapısı için Node.js 24+ ve npm gerekir:
+
+```powershell
+cd api
+npm ci
+npm run typecheck
+npm test
+npm run build
+```
+
+Bu komutlar TypeScript kontrolünü, Socket.IO, devir ve HTTP testlerini ve derlemeyi çalıştırır.
+Ana Express girişi (`src/app.ts`, `src/index.ts`), gerçek JWT doğrulama adaptörü,
+veritabanı ve Python bağımlılıkları henüz hazır değildir; uygulama için `start`
+komutu eklenmemiştir. Socket.IO kurulumu ve ekip entegrasyonu için
+[Bölüm 2 rehberine](docs/api/support-socket-setup.md), devir servisi ve dört HTTP yolu
+için [Bölüm 3'e](docs/api/support-handoff-setup.md), önerilen HTTP/olay sözleşmesi
+için [Bölüm 1'e](docs/api/support-contract.md) bakın.
 
 ## Çalışma kuralları
 
