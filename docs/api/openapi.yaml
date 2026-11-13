@@ -1,0 +1,569 @@
+# TR: Hasti'nin önerdiği API sözleşmesi; dört HTTP yolu hazır, gerçek entegrasyonlar bekleniyor.
+# EN: Hasti's proposed API contract; four HTTP routes are implemented, production integrations pending.
+# TR: Mesaj şemaları sonraki bölüm içindir; burada tanımlanması çalıştığı anlamına gelmez.
+# EN: Message schemas describe the next stage; a schema definition does not imply implementation.
+openapi: 3.0.3
+info:
+  title: Kalkan API — Canlı Destek
+  version: 0.1.0
+  description: |
+    Hasti / Kullanıcı-4 için sözleşme taslağıdır. Devir/durum/kabul/kapatma router'ı
+    uygulanmıştır; üretim auth, veritabanı ve kuyruk entegrasyonları beklenmektedir.
+    Mesaj geçmişi ve mesajlaşma henüz uygulanmamıştır.
+    Yol, rol, kimlik ve veri modeli kararları ekip değerlendirmesine açıktır.
+    HTTP sözleşmesi bu dosyada, Socket.IO olayları support-contract.md dosyasındadır.
+    İrem Karabıyık tarafından değerlendirilmek üzere hazırlanmıştır.
+tags:
+  - name: Support
+    description: Asistandan uzmana devir ve canlı destek oturumları.
+security:
+  - bearerAuth: []
+paths:
+  /support/handoffs:
+    post:
+      tags: [Support]
+      operationId: requestSupportHandoff
+      summary: Kullanıcının sohbetini canlı desteğe aktar
+      description: |
+        Yalnızca sohbetin sahibi olan user rolü çağırabilir. Kullanıcı kimliği
+        doğrulanmış oturumdan alınır; gövdeden kullanıcı/uzman kimliği kabul edilmez.
+        Aynı conversationId için eşzamanlı isteklerde tek oturum oluşturulur.
+        Mevcut queued/active oturum 200 ile döner; kapalı oturum yeniden açılmaz (409).
+        İlk oluşturma oturumu ve kalıcı kuyruk teslim kaydını atomik kaydeder;
+        201 uzman atandığı anlamına gelmez. Kuyruk entegrasyonu Seyit ile yapılır.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoffRequest'
+            example:
+              conversationId: chat_example_1
+      responses:
+        '201':
+          description: Destek oturumu queued durumunda oluşturuldu.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportSession'
+        '200':
+          description: Bu sohbetin mevcut queued/active oturumu döndürüldü.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /support/sessions/{sessionId}:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Support]
+      operationId: getSupportSession
+      summary: Destek oturumunun güncel durumunu al
+      description: |
+        Yalnızca oturum sahibi veya atanmış uzman okuyabilir. Diğer kullanıcılara
+        ve atanmamış uzmanlara, kaynağın varlığını açıklamamak için 404 döner.
+        admin rolü tek başına konuşma okuma yetkisi vermez.
+      responses:
+        '200':
+          description: Güncel oturum; kapalı oturumlar da okunabilir.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /support/sessions/{sessionId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Support]
+      operationId: listSupportMessages
+      summary: Canlı destek mesajlarını sıralı ve sayfalı getir
+      description: |
+        Erişim, oturumu okuma kurallarıyla aynıdır. Yalnızca insan desteği mesajları
+        döner; AI sohbet geçmişi Furkan'ın chat modülünden yetki kontrolüyle alınır.
+        sequence artan sıradadır. afterSequence hariç tutulur; 0 ilk sayfadır.
+        Yeniden bağlantıda eksik mesajlar bu uç noktayla tamamlanır.
+      parameters:
+        - name: afterSequence
+          in: query
+          description: Son alınan mesajın sıra numarası; yalnızca daha yeniler döner.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: Mesaj sayfası; boş items dizisi geçerlidir.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+              example:
+                items: []
+                nextAfterSequence: 0
+                hasMore: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /support/sessions/{sessionId}/accept:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Support]
+      operationId: acceptSupportSession
+      summary: Kuyruktaki görüşmeyi uzman olarak kabul et
+      description: |
+        Yalnızca expert rolü çağırır; istek gövdesi yoktur. Uzman kimliği JWT'den
+        alınır. Seyit'in kuyruk servisi uzmanın bu oturumu almaya uygun olduğunu
+        doğrular. Uygun olmayan/oturuma erişemeyen uzmana 404 döner.
+        queued -> active geçişi ve uzman ataması atomiktir: yalnızca bir uzman
+        kazanır. Aynı atanmış uzman tekrarlarsa 200, uygun başka uzman yarışmayı
+        kaybederse 409 döner. Kapalı oturum için 409 döner.
+      responses:
+        '200':
+          description: Uzman atandı veya aynı uzmanın mevcut ataması döndürüldü.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /support/sessions/{sessionId}/close:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Support]
+      operationId: closeSupportSession
+      summary: Destek görüşmesini kapat veya bekleyen isteği iptal et
+      description: |
+        İstek gövdesi yoktur. Oturum sahibi queued/active oturumu, atanmış uzman
+        active oturumu kapatabilir. Yetkisiz kaynak erişimi 404 döner.
+        Kapalı oturuma aynı yetkili katılımcının tekrarı 200 ile mevcut sonucu döner.
+        closeReason sunucuda aktöre göre belirlenir; kuyruk iptali için kalıcı teslim
+        kaydı yazılır. Kapalı oturum gecikmiş bir kuyruk işiyle yeniden atanamaz.
+        Mesaj gönderme, kabul ve kapatma yarışları kalıcı depoda sıralanır.
+      responses:
+        '200':
+          description: Kapalı oturumun güncel hali.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Kimlik doğrulama ekibinin ürettiği geçerli erişim token'ı.
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ResourceId'
+  responses:
+    BadRequest:
+      description: |
+        INVALID_PAYLOAD — eksik/geçersiz alan, fazladan alan, geçersiz sorgu veya
+        bozuk JSON. Devir router'ı yalnızca application/json kabul eder; gövde
+        sınırı 8 KiB'dir. Desteklenmeyen gövde/encoding ve boyut aşımı da 400 döner.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: UNAUTHENTICATED — token yok, geçersiz veya süresi dolmuş.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            example: Bearer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: FORBIDDEN — bu işlem için rol uygun değil.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: NOT_FOUND — kaynak yok veya aktörün bu kaynağa erişimi yok.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: SESSION_CLOSED veya ALREADY_ASSIGNED — oturum durumu işleme uygun değil.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: RATE_LIMITED — yapılandırılmış istek sınırı aşıldı.
+      headers:
+        Retry-After:
+          description: Yeniden denemeden önce beklenecek saniye.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: INTERNAL_ERROR — beklenmeyen hata; teknik ayrıntı istemciye verilmez.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unavailable:
+      description: SERVICE_UNAVAILABLE — gerekli servis/depo geçici olarak kullanılamıyor.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ResourceId:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: '^[A-Za-z0-9_-]+$'
+      description: Opak kimlik; gerçek üretim biçimi veritabanı ekibiyle kararlaştırılır.
+      example: support_example_1
+    HandoffRequest:
+      type: object
+      additionalProperties: false
+      required: [conversationId]
+      properties:
+        conversationId:
+          $ref: '#/components/schemas/ResourceId'
+    SupportSession:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - conversationId
+        - userId
+        - agentId
+        - status
+        - source
+        - revision
+        - createdAt
+        - updatedAt
+        - closedAt
+        - closeReason
+      properties:
+        id:
+          $ref: '#/components/schemas/ResourceId'
+        conversationId:
+          $ref: '#/components/schemas/ResourceId'
+        userId:
+          $ref: '#/components/schemas/ResourceId'
+        agentId:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: queued durumunda null; active durumunda atanmış uzman.
+        status:
+          type: string
+          enum: [queued, active, closed]
+        source:
+          type: string
+          enum: [user_request, assistant_escalation]
+          description: Sunucu belirler; assistant_escalation yalnızca güvenilir iç çağrıda kullanılır.
+        revision:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+          description: Her durum değişiminde artar; eski olayları ayırt etmek içindir.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+        closeReason:
+          type: string
+          nullable: true
+          enum: [user_closed, agent_closed, null]
+      example:
+        id: support_example_1
+        conversationId: chat_example_1
+        userId: user_example_1
+        agentId: null
+        status: queued
+        source: user_request
+        revision: 1
+        createdAt: '2026-11-13T18:00:00Z'
+        updatedAt: '2026-11-13T18:00:00Z'
+        closedAt: null
+        closeReason: null
+    JoinSupportRequest:
+      type: object
+      additionalProperties: false
+      required: [sessionId]
+      properties:
+        sessionId:
+          $ref: '#/components/schemas/ResourceId'
+    SendSupportMessageRequest:
+      type: object
+      additionalProperties: false
+      required: [sessionId, clientMessageId, text]
+      properties:
+        sessionId:
+          $ref: '#/components/schemas/ResourceId'
+        clientMessageId:
+          type: string
+          format: uuid
+          description: İstemci bir kez üretir; aynı mesajın tekrarlarında değiştirmez.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          pattern: '\S'
+          description: Düz metin; yalnızca boşluk içeremez. HTML olarak işlenmez.
+      example:
+        sessionId: support_example_1
+        clientMessageId: 8b841b65-1249-4de9-a7bc-0d676ff47ff1
+        text: Bu mesajın güvenli olup olmadığını anlamak istiyorum.
+    SupportMessage:
+      type: object
+      additionalProperties: false
+      required: [id, sessionId, clientMessageId, senderId, senderRole, sequence, text, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/ResourceId'
+        sessionId:
+          $ref: '#/components/schemas/ResourceId'
+        clientMessageId:
+          type: string
+          format: uuid
+        senderId:
+          $ref: '#/components/schemas/ResourceId'
+        senderRole:
+          type: string
+          enum: [user, expert]
+        sequence:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+          description: Oturum içinde sunucunun verdiği benzersiz, artan sıra numarası.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          pattern: '\S'
+          description: Sunucunun doğruladığı ve gerekiyorsa maskelediği düz metin.
+        createdAt:
+          type: string
+          format: date-time
+      example:
+        id: message_example_1
+        sessionId: support_example_1
+        clientMessageId: 8b841b65-1249-4de9-a7bc-0d676ff47ff1
+        senderId: user_example_1
+        senderRole: user
+        sequence: 1
+        text: Bu mesajın güvenli olup olmadığını anlamak istiyorum.
+        createdAt: '2026-11-13T18:01:00Z'
+    MessagePage:
+      type: object
+      additionalProperties: false
+      required: [items, nextAfterSequence, hasMore]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/SupportMessage'
+        nextAfterSequence:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Son dönen sequence; boş sayfada istekteki afterSequence değeri.
+        hasMore:
+          type: boolean
+          description: Yanıt sorgulandığında bu sayfadan sonra kayıtlı mesaj var mı?
+    SupportError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - INVALID_PAYLOAD
+            - UNAUTHENTICATED
+            - FORBIDDEN
+            - NOT_FOUND
+            - SESSION_CLOSED
+            - SESSION_NOT_ACTIVE
+            - ALREADY_ASSIGNED
+            - MESSAGE_ID_CONFLICT
+            - RATE_LIMITED
+            - SERVICE_UNAVAILABLE
+            - INTERNAL_ERROR
+        message:
+          type: string
+          minLength: 1
+          description: Türkçe kullanıcı mesajı; stack trace, token veya ham kullanıcı girdisi içermez.
+        retryAfterSeconds:
+          type: integer
+          minimum: 1
+          description: RATE_LIMITED hatasında zorunlu; HTTP Retry-After ile aynı değer.
+      example:
+        code: NOT_FOUND
+        message: Destek oturumu bulunamadı.
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/SupportError'
+    SocketErrorAck:
+      type: object
+      additionalProperties: false
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          enum: [false]
+        error:
+          $ref: '#/components/schemas/SupportError'
+    SessionAck:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [ok, data]
+          properties:
+            ok:
+              type: boolean
+              enum: [true]
+            data:
+              $ref: '#/components/schemas/SupportSession'
+        - $ref: '#/components/schemas/SocketErrorAck'
+    MessageAck:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [ok, data]
+          properties:
+            ok:
+              type: boolean
+              enum: [true]
+            data:
+              $ref: '#/components/schemas/SupportMessage'
+        - $ref: '#/components/schemas/SocketErrorAck'
+x-socketio:
+  description: Bu özel uzantı Socket.IO taslağıdır; OpenAPI HTTP paths içinde WebSocket tanımlamaz.
+  namespace: /support
+  transportPath: /socket.io
+  authentication: handshake.auth.token
+  clientEvents:
+    support:join:
+      payload:
+        $ref: '#/components/schemas/JoinSupportRequest'
+      acknowledgement:
+        $ref: '#/components/schemas/SessionAck'
+    support:message:send:
+      payload:
+        $ref: '#/components/schemas/SendSupportMessageRequest'
+      acknowledgement:
+        $ref: '#/components/schemas/MessageAck'
+  serverEvents:
+    support:session:updated:
+      payload:
+        $ref: '#/components/schemas/SupportSession'
+    support:message:created:
+      payload:
+        $ref: '#/components/schemas/SupportMessage'
+    support:error:
+      payload:
+        $ref: '#/components/schemas/SupportError'
