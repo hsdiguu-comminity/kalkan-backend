@@ -34,13 +34,25 @@ npm test
 npm run build
 ```
 
+Geliştirme sunucusu için `npm run dev` (http://localhost:3000, sağlık kontrolü: `/health`).
 Bu komutlar TypeScript kontrolünü, Socket.IO, devir ve HTTP testlerini ve derlemeyi çalıştırır.
-Ana Express girişi (`src/app.ts`, `src/index.ts`), gerçek JWT doğrulama adaptörü,
-veritabanı ve Python bağımlılıkları henüz hazır değildir; uygulama için `start`
-komutu eklenmemiştir. Socket.IO kurulumu ve ekip entegrasyonu için
+Canlı destek router'ı ve Socket.IO sunucusu, gerçek JWT doğrulama adaptörü ve veritabanı
+hazır olduğunda `src/app.ts` / `src/index.ts` içine bağlanacak. Socket.IO kurulumu ve ekip entegrasyonu için
 [Bölüm 2 rehberine](docs/api/support-socket-setup.md), devir servisi ve dört HTTP yolu
 için [Bölüm 3'e](docs/api/support-handoff-setup.md), önerilen HTTP/olay sözleşmesi
 için [Bölüm 1'e](docs/api/support-contract.md) bakın.
+
+Güvenlik araçları servisi (Python 3.12+):
+
+```bash
+cd tools-service
+python -m venv .venv
+.venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload --port 8001
+pytest
+ruff check . && ruff format .
+```
 
 ## Çalışma kuralları
 

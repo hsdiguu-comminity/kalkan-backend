@@ -1,0 +1,21 @@
+[project]
+name = "kalkan-tools-service"
+version = "0.1.0"
+description = "Kalkan güvenlik araçları servisi (link/QR, hash, parola sızıntı, e-posta başlığı)"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]  # testlerde assert kullanılır
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
