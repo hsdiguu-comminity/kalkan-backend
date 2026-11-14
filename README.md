@@ -42,6 +42,20 @@ hazır olduğunda `src/app.ts` / `src/index.ts` içine bağlanacak. Socket.IO ku
 için [Bölüm 3'e](docs/api/support-handoff-setup.md), önerilen HTTP/olay sözleşmesi
 için [Bölüm 1'e](docs/api/support-contract.md) bakın.
 
+Veritabanı (PostgreSQL + Prisma 7):
+
+```bash
+docker compose up -d                 # PostgreSQL ve Redis (repo kökünde)
+cd api
+cp ../.env.example .env              # DATABASE_URL yerel docker ayarına göre hazırdır
+npm run prisma:deploy                # Migration'ları uygular (ilk kurulum)
+npm run prisma:studio                # Tabloları tarayıcıda görüntüler
+```
+
+Şema `api/prisma/schema.prisma` dosyasındadır; değişiklik sonrası `npm run prisma:migrate -- --name <aciklama>`
+ile yeni migration oluşturulur. İstemci `npm install` sırasında `src/generated/prisma` altına üretilir;
+kodda `getPrisma()` (`src/lib/prisma.ts`) kullanılır.
+
 Güvenlik araçları servisi (Python 3.12+):
 
 ```bash

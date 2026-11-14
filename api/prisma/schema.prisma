@@ -1,0 +1,555 @@
+// Kalkan veritabanı şeması (PostgreSQL).
+//
+// Kurallar:
+// - Kişisel veriler (telefon, isim, IBAN, e-posta adresi içeren metinler) veritabanına
+//   YAZILMADAN ÖNCE api/src/lib/masking.ts ile maskelenir. "masked" önekli alanlar bunu belirtir.
+// - Parola, kart numarası, doğrulama kodu gibi hassas bilgiler hiçbir tabloda tutulmaz.
+// - Analiz sonuçları kesin hüküm değil, risk_level + reasons olarak saklanır.
+// - Enum değerleri API'deki (ör. canlı destek servisi) değerlerle birebir aynıdır.
+//
+// Değişiklik sonrası: npx prisma migrate dev --name <aciklama>
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================ Kimlik doğrulama (/auth)
+
+enum UserRole {
+  user
+  expert
+  admin
+}
+
+enum UserStatus {
+  active
+  suspended
+  deleted
+}
+
+model User {
+  id               String     @id @default(cuid())
+  email            String     @unique
+  /// Argon2 hash'i. Düz parola asla saklanmaz.
+  passwordHash     String     @map("password_hash")
+  displayName      String?    @map("display_name") @db.VarChar(80)
+  role             UserRole   @default(user)
+  status           UserStatus @default(active)
+  emailVerifiedAt  DateTime?  @map("email_verified_at")
+  twoFactorEnabled Boolean    @default(false) @map("two_factor_enabled")
+  /// TOTP gizli anahtarı, uygulama katmanında şifrelenmiş olarak saklanır.
+  twoFactorSecret  String?    @map("two_factor_secret")
+  /// KVKK açık rıza metninin kabul edildiği zaman.
+  kvkkConsentAt    DateTime?  @map("kvkk_consent_at")
+  lastLoginAt      DateTime?  @map("last_login_at")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  refreshTokens    RefreshToken[]
+  conversations    Conversation[]
+  analyses         Analysis[]
+  supportSessions  SupportSession[]    @relation("SupportSessionUser")
+  assignedSessions SupportSession[]    @relation("SupportSessionAgent")
+  agentOffers      SupportAgentOffer[]
+  supportMessages  SupportMessage[]
+  tickets          Ticket[]            @relation("TicketOwner")
+  assignedTickets  Ticket[]            @relation("TicketAgent")
+  ticketMessages   TicketMessage[]
+  reports          Report[]            @relation("ReportReporter")
+  moderatedReports Report[]            @relation("ReportModerator")
+  notifications    Notification[]
+  lessonProgress   LessonProgress[]
+  quizAttempts     QuizAttempt[]
+  verifiedWarnings EarlyWarning[]
+  auditLogs        AuditLog[]
+
+  @@index([role])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  /// Token'ın SHA-256 hash'i; token'ın kendisi saklanmaz.
+  tokenHash String    @unique @map("token_hash")
+  userAgent String?   @map("user_agent") @db.VarChar(255)
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ============================================================ Asistan sohbeti ve analizler (/chat, /tools)
+
+enum MessageRole {
+  user
+  assistant
+  system
+}
+
+model Conversation {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  title     String?   @db.VarChar(120)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages       Message[]
+  analyses       Analysis[]
+  supportSession SupportSession?
+
+  @@index([userId, updatedAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String      @map("conversation_id")
+  role           MessageRole
+  /// Hassas bilgi (parola, kart no, doğrulama kodu) tespit edilirse maskelenmiş hali yazılır.
+  content        String      @db.Text
+  analysisId     String?     @unique @map("analysis_id")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  analysis     Analysis?    @relation(fields: [analysisId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+enum AnalysisInputType {
+  sms
+  link
+  qr
+  email
+  email_header
+  file_hash
+  screenshot
+  password_leak
+}
+
+enum AnalysisSource {
+  ai
+  tools
+  combined
+}
+
+enum RiskLevel {
+  low
+  medium
+  high
+}
+
+/// Asistan veya güvenlik araçlarının ürettiği tek bir analiz sonucu.
+model Analysis {
+  id             String            @id @default(cuid())
+  userId         String?           @map("user_id")
+  conversationId String?           @map("conversation_id")
+  inputType      AnalysisInputType @map("input_type")
+  source         AnalysisSource
+  /// Girdinin maskelenmiş, kısaltılmış önizlemesi (ör. linkin alan adı, SMS'in maskelenmiş hali).
+  maskedInput    String?           @map("masked_input") @db.VarChar(500)
+  /// Girdinin SHA-256 özeti; aynı içerik tekrar sorulduğunda önbellek ve istatistik için.
+  inputDigest    String?           @map("input_digest") @db.VarChar(64)
+  riskLevel      RiskLevel         @map("risk_level")
+  /// Kullanıcıya gösterilen Türkçe gerekçeler (string dizisi).
+  reasons        Json
+  score          Float?
+  /// ör. kargo, banka, vergi_iadesi, yatirim, sahte_odul
+  category       String?           @db.VarChar(40)
+  modelVersion   String?           @map("model_version") @db.VarChar(40)
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  message      Message?
+
+  @@index([inputDigest])
+  @@index([createdAt, riskLevel])
+  @@map("analyses")
+}
+
+// ============================================================ Canlı destek (/support)
+// Alanlar api/src/modules/support/handoff.service.ts içindeki SupportSession ile birebir aynıdır.
+
+enum SupportSessionStatus {
+  queued
+  active
+  closed
+}
+
+enum SupportSessionSource {
+  user_request
+  assistant_escalation
+}
+
+enum SupportCloseReason {
+  user_closed
+  agent_closed
+}
+
+model SupportSession {
+  id             String               @id @default(cuid())
+  /// Her sohbet için en fazla bir destek oturumu.
+  conversationId String               @unique @map("conversation_id")
+  userId         String               @map("user_id")
+  agentId        String?              @map("agent_id")
+  status         SupportSessionStatus @default(queued)
+  source         SupportSessionSource
+  /// İyimser kilit için her güncellemede 1 artar.
+  revision       Int                  @default(1)
+  closedAt       DateTime?            @map("closed_at")
+  closeReason    SupportCloseReason?  @map("close_reason")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+
+  conversation Conversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User                 @relation("SupportSessionUser", fields: [userId], references: [id], onDelete: Cascade)
+  agent        User?                @relation("SupportSessionAgent", fields: [agentId], references: [id], onDelete: SetNull)
+  offers       SupportAgentOffer[]
+  messages     SupportMessage[]
+  outbox       SupportOutboxEvent[]
+  tickets      Ticket[]
+
+  @@index([status, createdAt])
+  @@index([agentId, status])
+  @@map("support_sessions")
+}
+
+/// Uzman kuyruğunun bir oturumu belirli bir uzmana teklif etmesi (atama değildir).
+model SupportAgentOffer {
+  id        String   @id @default(cuid())
+  sessionId String   @map("session_id")
+  agentId   String   @map("agent_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  session SupportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  agent   User           @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, agentId])
+  @@map("support_agent_offers")
+}
+
+model SupportMessage {
+  id         String   @id @default(cuid())
+  sessionId  String   @map("session_id")
+  senderId   String   @map("sender_id")
+  senderRole UserRole @map("sender_role")
+  content    String   @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  session SupportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sender  User           @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("support_messages")
+}
+
+/// Transactional outbox: oturumla aynı transaction'da yazılır, kuyruk işçisi sonradan işler.
+model SupportOutboxEvent {
+  /// Servisin ürettiği benzersiz olay kimliği.
+  id          String    @id
+  sessionId   String    @map("session_id")
+  /// support.queued | support.accepted | support.closed
+  type        String    @db.VarChar(40)
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at")
+  processedAt DateTime? @map("processed_at")
+
+  session SupportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([processedAt, createdAt])
+  @@map("support_outbox_events")
+}
+
+// ============================================================ Talepler (ticket)
+
+enum TicketStatus {
+  open
+  in_progress
+  resolved
+  closed
+}
+
+enum TicketPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+model Ticket {
+  id               String         @id @default(cuid())
+  userId           String         @map("user_id")
+  supportSessionId String?        @map("support_session_id")
+  assignedAgentId  String?        @map("assigned_agent_id")
+  subject          String         @db.VarChar(160)
+  status           TicketStatus   @default(open)
+  priority         TicketPriority @default(normal)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  closedAt         DateTime?      @map("closed_at")
+
+  user           User            @relation("TicketOwner", fields: [userId], references: [id], onDelete: Cascade)
+  assignedAgent  User?           @relation("TicketAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  supportSession SupportSession? @relation(fields: [supportSessionId], references: [id], onDelete: SetNull)
+  messages       TicketMessage[]
+
+  @@index([userId, status])
+  @@index([assignedAgentId, status])
+  @@map("tickets")
+}
+
+model TicketMessage {
+  id        String   @id @default(cuid())
+  ticketId  String   @map("ticket_id")
+  authorId  String   @map("author_id")
+  content   String   @db.Text
+  /// true ise yalnızca uzmanlar görür (iç not).
+  internal  Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_messages")
+}
+
+// ============================================================ İhbarlar (/reports)
+
+enum ReportChannel {
+  sms
+  phone_call
+  email
+  whatsapp
+  social_media
+  website
+  other
+}
+
+enum ReportStatus {
+  pending
+  approved
+  rejected
+}
+
+/// Anonim ihbar. Tüm serbest metin alanları kaydedilmeden önce maskelenir.
+model Report {
+  id                      String        @id @default(cuid())
+  /// Giriş yapmadan ihbar verilebilir; bu durumda boştur.
+  reporterId              String?       @map("reporter_id")
+  channel                 ReportChannel
+  /// ör. kargo, banka, vergi_iadesi, yatirim, sahte_odul, diger
+  category                String        @db.VarChar(40)
+  /// Taklit edilen kurum (ör. "PTT", "e-Devlet").
+  impersonatedInstitution String?       @map("impersonated_institution") @db.VarChar(120)
+  maskedContent           String        @map("masked_content") @db.Text
+  maskedSender            String?       @map("masked_sender") @db.VarChar(120)
+  /// Bildirilen linkin alan adı (tam URL'deki kişisel parametreler atılır).
+  urlDomain               String?       @map("url_domain") @db.VarChar(253)
+  /// İl adı; ilçe/adres tutulmaz.
+  city                    String?       @db.VarChar(40)
+  financialLoss           Boolean       @default(false) @map("financial_loss")
+  occurredAt              DateTime?     @map("occurred_at")
+  status                  ReportStatus  @default(pending)
+  moderatorId             String?       @map("moderator_id")
+  moderatedAt             DateTime?     @map("moderated_at")
+  createdAt               DateTime      @default(now()) @map("created_at")
+
+  reporter  User? @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  moderator User? @relation("ReportModerator", fields: [moderatorId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([category, createdAt])
+  @@index([city, createdAt])
+  @@map("reports")
+}
+
+// ============================================================ Erken uyarı (/stats)
+
+enum WarningStatus {
+  draft
+  verified
+  published
+  dismissed
+}
+
+enum WarningSeverity {
+  info
+  warning
+  critical
+}
+
+/// Veri Bilimi'nin ürettiği, Siber Güvenlik'in doğruladığı erken uyarılar.
+model EarlyWarning {
+  id           String          @id @default(cuid())
+  category     String          @db.VarChar(40)
+  city         String?         @db.VarChar(40)
+  title        String          @db.VarChar(160)
+  message      String          @db.Text
+  severity     WarningSeverity @default(warning)
+  status       WarningStatus   @default(draft)
+  /// Tespit yöntemi: zscore, forecast, isolation_forest
+  detector     String?         @db.VarChar(40)
+  verifiedById String?         @map("verified_by_id")
+  verifiedAt   DateTime?       @map("verified_at")
+  publishedAt  DateTime?       @map("published_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  verifiedBy User? @relation(fields: [verifiedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@map("early_warnings")
+}
+
+// ============================================================ Farkındalık akademisi (/academy)
+
+model Lesson {
+  id        String   @id @default(cuid())
+  slug      String   @unique @db.VarChar(80)
+  title     String   @db.VarChar(160)
+  summary   String?  @db.VarChar(300)
+  /// Markdown içerik (kalkan-security/tool-engine/academy-content kaynaklı).
+  content   String   @db.Text
+  order     Int      @default(0)
+  published Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  quizzes  Quiz[]
+  progress LessonProgress[]
+
+  @@index([published, order])
+  @@map("lessons")
+}
+
+model LessonProgress {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  lessonId    String   @map("lesson_id")
+  completedAt DateTime @default(now()) @map("completed_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@map("lesson_progress")
+}
+
+model Quiz {
+  id        String   @id @default(cuid())
+  lessonId  String?  @map("lesson_id")
+  title     String   @db.VarChar(160)
+  published Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  lesson    Lesson?        @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  questions QuizQuestion[]
+  attempts  QuizAttempt[]
+
+  @@map("quizzes")
+}
+
+model QuizQuestion {
+  id           String  @id @default(cuid())
+  quizId       String  @map("quiz_id")
+  prompt       String  @db.Text
+  /// Seçenekler (string dizisi).
+  options      Json
+  correctIndex Int     @map("correct_index")
+  explanation  String? @db.Text
+  order        Int     @default(0)
+
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@index([quizId, order])
+  @@map("quiz_questions")
+}
+
+model QuizAttempt {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  quizId    String   @map("quiz_id")
+  score     Int
+  total     Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("quiz_attempts")
+}
+
+/// "Bu mesaj sahte mi?" oyunundaki örnek mesajlar (gerçek kişisel veri içermez).
+model GameMessage {
+  id          String   @id @default(cuid())
+  content     String   @db.Text
+  isFake      Boolean  @map("is_fake")
+  explanation String   @db.Text
+  category    String?  @db.VarChar(40)
+  published   Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("game_messages")
+}
+
+// ============================================================ Bildirimler ve denetim kaydı
+
+enum NotificationType {
+  support_update
+  ticket_update
+  early_warning
+  report_update
+  system
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String           @db.VarChar(160)
+  body      String           @db.Text
+  /// Bildirime tıklanınca açılacak uygulama içi yol (ör. /support/sessions/abc).
+  link      String?          @db.VarChar(255)
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+/// Yönetici ve uzman işlemlerinin kaydı (moderasyon, rol değişikliği, oturum kapatma vb.).
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?  @map("actor_id")
+  action     String   @db.VarChar(80)
+  targetType String   @map("target_type") @db.VarChar(40)
+  targetId   String?  @map("target_id")
+  /// Kişisel veri içermeyen ek bilgiler.
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
