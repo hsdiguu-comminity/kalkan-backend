@@ -1,7 +1,5 @@
-# TR: Hasti'nin önerdiği API sözleşmesi; dört HTTP yolu hazır, gerçek entegrasyonlar bekleniyor.
-# EN: Hasti's proposed API contract; four HTTP routes are implemented, production integrations pending.
-# TR: Mesaj şemaları sonraki bölüm içindir; burada tanımlanması çalıştığı anlamına gelmez.
-# EN: Message schemas describe the next stage; a schema definition does not imply implementation.
+# TR: Beş HTTP yolu, mesaj/Prisma/auth/dispatcher hazır; ekip adaptörleri için support-integration-setup.md.
+# EN: HTTP, messaging, Prisma, auth bridge and dispatcher implemented; see integration guide for team dependencies.
 openapi: 3.0.3
 info:
   title: Kalkan API — Canlı Destek
@@ -9,7 +7,7 @@ info:
   description: |
     Hasti / Kullanıcı-4 için sözleşme taslağıdır. Devir/durum/kabul/kapatma router'ı
     uygulanmıştır; üretim auth, veritabanı ve kuyruk entegrasyonları beklenmektedir.
-    Mesaj geçmişi ve mesajlaşma henüz uygulanmamıştır.
+    Mesaj geçmişi ve Socket.IO mesajlaşma modülleri uygulanmıştır; gerçek adaptörlere bağlanmalıdır.
     Yol, rol, kimlik ve veri modeli kararları ekip değerlendirmesine açıktır.
     HTTP sözleşmesi bu dosyada, Socket.IO olayları support-contract.md dosyasındadır.
     İrem Karabıyık tarafından değerlendirilmek üzere hazırlanmıştır.

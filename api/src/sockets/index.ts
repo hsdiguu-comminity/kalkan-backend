@@ -1,13 +1,16 @@
 /**
  * TR: Hasti — Socket.IO bağlantısı, auth kontrolü ve bağlantı temizliği.
  * EN: Hasti — Socket.IO setup, authentication checks and connection cleanup.
- * TR: Gerçek JWT doğrulaması auth ekibinden gelir; mesajlaşma işleyicileri henüz eklenmedi.
- * EN: The auth team supplies JWT verification; messaging handlers are not implemented yet.
+ * TR: JWT doğrulaması auth ekibinden gelir; verilen destek servisleri mesajlaşmayı etkinleştirir.
+ * EN: The auth team supplies JWT verification; injected support services enable messaging.
  */
 import type { Server as HttpServer } from "node:http";
 import type { Server as HttpsServer } from "node:https";
 import { Server, type Namespace, type Socket } from "socket.io";
 import { z } from "zod";
+import { createSupportRealtime } from "./support.socket.js";
+import { SupportServiceError, type HandoffService, type SupportSession, type SupportErrorCode } from "../modules/support/handoff.service.js";
+import type { SupportMessage, SupportMessageService } from "../modules/support/message.service.js";
 
 export const SUPPORT_NAMESPACE = "/support";
 export const SOCKET_IO_PATH = "/socket.io";
@@ -49,10 +52,12 @@ interface SocketData {
   principal: SupportPrincipal;
 }
 
-// İş olayları sonraki bölümde kendi girdi şemalarıyla kaydedilir.
+// TR: İş olayları kendi katı şemalarıyla doğrulanır. EN: Business events validate their own strict schemas.
 type Events = Record<string, (...args: unknown[]) => void>;
 type ServerEvents = {
-  "support:error": (error: SupportConnectionError) => void;
+  "support:error": (error: { code: SupportErrorCode | SupportConnectionError["code"]; message: string }) => void;
+  "support:message:created": (message: SupportMessage) => void;
+  "support:session:updated": (session: SupportSession) => void;
 };
 type InterServerEvents = Record<string, never>;
 
@@ -60,6 +65,8 @@ export type SupportSocket = Socket<Events, ServerEvents, InterServerEvents, Sock
 export type SupportNamespace = Namespace<Events, ServerEvents, InterServerEvents, SocketData>;
 
 export interface SupportSocketOptions {
+  /** TR: Verilmezse yalnızca bağlantı katmanı kurulur. EN: Omit only for connection-layer setup. */
+  support?: { handoff: HandoffService; messages: SupportMessageService };
   allowedOrigins: string[];
   /** Android gibi Origin göndermeyen istemciler için açıkça true seçilmelidir. */
   allowRequestsWithoutOrigin?: boolean;
@@ -82,6 +89,8 @@ export interface SupportSocketOptions {
 
 export interface SupportSocketServer {
   namespace: SupportNamespace;
+  /** TR: Outbox sonrası yerel alıcılara güncel durum. EN: Publish current state locally after outbox commit. */
+  publishSessionUpdate: (sessionId: string) => Promise<void>;
   /** Bu süreçte kullanıcının tüm bağlantılarını keser; token'ı ayrıca auth katmanı iptal eder. */
   disconnectUser: (userId: string) => number;
   /** Socket.IO ile birlikte bağlı HTTP sunucusunu da kapatır. Tekrar çağrılabilir. */
@@ -247,6 +256,25 @@ export function createSupportSocketServer(
     socket.disconnect(true);
   }
 
+  const realtime = options.support ? createSupportRealtime({
+    namespace, ...options.support,
+    async authorizeSocket(socket) {
+      const state = connections.get(socket);
+      if (!state?.principal || !socket.connected || state.controller.signal.aborted) {
+        throw new SupportServiceError("UNAUTHENTICATED");
+      }
+      try {
+        const current = await authenticate(state.token, state.controller.signal);
+        if (current.userId !== state.principal.userId || current.role !== state.principal.role ||
+            current.expiresAt !== state.principal.expiresAt) throw new ConnectionError(errors.unauthenticated);
+      } catch (error) {
+        const data = error instanceof ConnectionError ? error.data : errors.unavailable;
+        disconnect(socket, data);
+        throw new SupportServiceError(data.code);
+      }
+    },
+  }) : undefined;
+
   namespace.on("connection", (socket) => {
     const state = connections.get(socket);
     if (!state?.principal || closing) {
@@ -305,6 +333,7 @@ export function createSupportSocketServer(
     });
 
     try {
+      realtime?.registerHandlers(socket);
       options.registerHandlers?.(socket);
     } catch {
       disconnect(socket, errors.internal);
@@ -313,6 +342,10 @@ export function createSupportSocketServer(
 
   return {
     namespace,
+    async publishSessionUpdate(sessionId) {
+      if (!realtime) throw new SupportServiceError("SERVICE_UNAVAILABLE");
+      await realtime.publishSessionUpdate(sessionId);
+    },
     // TR: Yalnızca bu süreçteki bağlantıları keser; token iptali auth ekibinin sorumluluğudur.
     // EN: Disconnects this process's clients only; the auth team must revoke the token separately.
     disconnectUser(userId) {

@@ -211,6 +211,8 @@ model SupportSession {
   source         SupportSessionSource
   /// İyimser kilit için her güncellemede 1 artar.
   revision       Int                  @default(1)
+  /// TR: Mesaj/kapanış aynı satırda sıralanır. EN: Message writes and closure serialize on this row.
+  lastMessageSequence Int              @default(0) @map("last_message_sequence")
   closedAt       DateTime?            @map("closed_at")
   closeReason    SupportCloseReason?  @map("close_reason")
   createdAt      DateTime             @default(now()) @map("created_at")
@@ -250,12 +252,19 @@ model SupportMessage {
   senderId   String   @map("sender_id")
   senderRole UserRole @map("sender_role")
   content    String   @db.Text
+  /// TR: İstemci tekrar anahtarı. EN: Client retry key, normalized UUID.
+  clientMessageId String @map("client_message_id") @db.Uuid
+  sequence Int
+  /// TR: Eski mesajlarda null; yeni mesajlarda HMAC. EN: Null for legacy rows; HMAC for new messages.
+  contentFingerprint String? @map("content_fingerprint") @db.VarChar(64)
   createdAt  DateTime @default(now()) @map("created_at")
 
   session SupportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   sender  User           @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
+  @@unique([sessionId, senderId, clientMessageId])
+  @@unique([sessionId, sequence])
   @@map("support_messages")
 }
 
@@ -269,10 +278,17 @@ model SupportOutboxEvent {
   payload     Json
   createdAt   DateTime  @default(now()) @map("created_at")
   processedAt DateTime? @map("processed_at")
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+  leaseToken String? @map("lease_token")
+  leaseExpiresAt DateTime? @map("lease_expires_at")
+  /// TR: Sabit kod, exception/metin yok. EN: Fixed code only, no raw exception or message text.
+  lastErrorCode String? @map("last_error_code") @db.VarChar(40)
 
   session SupportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([processedAt, createdAt])
+  @@index([processedAt, nextAttemptAt, leaseExpiresAt], map: "support_outbox_delivery_due_idx")
   @@map("support_outbox_events")
 }
 

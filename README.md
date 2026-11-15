@@ -34,12 +34,17 @@ npm test
 npm run build
 ```
 
-Geliştirme sunucusu için `npm run dev` (http://localhost:3000, sağlık kontrolü: `/health`).
-Bu komutlar TypeScript kontrolünü, Socket.IO, devir ve HTTP testlerini ve derlemeyi çalıştırır.
-Canlı destek router'ı ve Socket.IO sunucusu, gerçek JWT doğrulama adaptörü ve veritabanı
-hazır olduğunda `src/app.ts` / `src/index.ts` içine bağlanacak. Socket.IO kurulumu ve ekip entegrasyonu için
+Geliştirme sunucusu: npm run dev; sağlık kontrolü: /health.
+
+Bu komutlar TypeScript kontrolünü, Socket.IO, devir, mesaj/geçmiş testlerini ve derlemeyi çalıştırır.
+Ana Express girişi, Prisma destek adaptörü, JWT doğrulama seçeneği ve outbox/queue
+bağlantısı hazırdır. Üretim auth/iptal, maskeleme ve uzman-atama adaptörleri ekipçe
+sağlanmalıdır. `npm start`, adaptör modülü verilmezse health iskeletini açar ve
+`/support` için 503 döner. Güncel entegrasyon, migration ve test adımları için
+[Bölüm 6–8'e](docs/api/support-integration-setup.md) bakın. Socket.IO kurulumu için
 [Bölüm 2 rehberine](docs/api/support-socket-setup.md), devir servisi ve dört HTTP yolu
-için [Bölüm 3'e](docs/api/support-handoff-setup.md), önerilen HTTP/olay sözleşmesi
+için [Bölüm 3'e](docs/api/support-handoff-setup.md), canlı mesajlaşma ve geçmiş için
+[Bölüm 4–5'e](docs/api/support-messaging-setup.md), önerilen HTTP/olay sözleşmesi
 için [Bölüm 1'e](docs/api/support-contract.md) bakın.
 
 Veritabanı (PostgreSQL + Prisma 7):
