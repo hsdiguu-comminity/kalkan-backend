@@ -232,6 +232,8 @@ describe("Asistandan uzmana devir servisi", () => {
       findByConversationId: async () => session,
       hasAgentOffer: async () => false,
       saveSession: async () => {}, appendOutbox: async () => {},
+      findMessageByClientId: async () => null, nextMessageSequence: async () => 1,
+      saveMessage: async () => {}, listMessages: async () => [],
     }));
     await expect(f.service.getSession(f.user, session.id)).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
   });

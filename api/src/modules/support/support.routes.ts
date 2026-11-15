@@ -3,6 +3,7 @@
  * EN: Hasti — HTTP layer for handoff, status, acceptance and closure; logic lives in the service.
  */
 import { Router, json, type ErrorRequestHandler, type Request } from "express";
+import type { SupportMessageService } from "./message.service.js";
 import {
   SupportServiceError,
   validateSupportActor,
@@ -12,6 +13,7 @@ import {
 
 export interface SupportRouterOptions {
   service: HandoffService;
+  messages?: SupportMessageService;
   /**
    * TR: Auth middleware/servisinden doğrulanmış aktör alınır; body/query asla kullanılmaz.
    * EN: Supply an authenticated principal from the auth layer, never from body/query fields.
@@ -20,8 +22,8 @@ export interface SupportRouterOptions {
 }
 
 /**
- * TR: Ana uygulama bu router'ı /support altında bağlar. Mesaj geçmişi henüz uygulanmadı.
- * EN: Mount this router at /support in the main app. Message history is not implemented yet.
+ * TR: Ana uygulama bu router'ı /support altında bağlar; geçmiş için mesaj servisi gerekir.
+ * EN: Mount at /support; supply the message service to enable history.
  */
 export function createSupportRouter(options: SupportRouterOptions): Router {
   const router = Router();
@@ -45,8 +47,8 @@ export function createSupportRouter(options: SupportRouterOptions): Router {
 
   // TR: Yalnızca devir JSON gövdesi alır; diğer işlemlerde gövde ve bilinmeyen sorgu reddedilir.
   // EN: Only handoff accepts a JSON body; reject bodies on other actions and unknown query fields.
-  function checkRequest(request: Request, allowBody = false): void {
-    if (Object.keys(request.query).length !== 0 || (!allowBody && request.body !== undefined)) {
+  function checkRequest(request: Request, allowBody = false, allowedQuery: string[] = []): void {
+    if (Object.keys(request.query).some((key) => !allowedQuery.includes(key)) || (!allowBody && request.body !== undefined)) {
       throw new SupportServiceError("INVALID_PAYLOAD");
     }
     // JSON ayrıştırıcısının atladığı text/plain vb. gövdeler de kabul edilmez.
@@ -67,6 +69,13 @@ export function createSupportRouter(options: SupportRouterOptions): Router {
   router.get("/sessions/:sessionId", async (request, response) => {
     checkRequest(request);
     response.json(await options.service.getSession(actor(request), request.params.sessionId));
+  });
+  // TR: Cursor dışlayıcıdır; kopan bağlantı eksik mesajları buradan tamamlar.
+  // EN: The cursor is exclusive; reconnecting clients recover missing messages here.
+  router.get("/sessions/:sessionId/messages", async (request, response) => {
+    checkRequest(request, false, ["afterSequence", "limit"]);
+    if (!options.messages) throw new SupportServiceError("SERVICE_UNAVAILABLE");
+    response.json(await options.messages.listMessages(actor(request), request.params.sessionId, request.query));
   });
   router.post("/sessions/:sessionId/accept", async (request, response) => {
     checkRequest(request);

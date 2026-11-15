@@ -1,5 +1,8 @@
 # Asistandan uzmana devir — Bölüm 3
 
+> Güncel DB/auth/dispatcher ve ana uygulama bağlantısı için
+> [Bölüm 6–8](support-integration-setup.md) esas alınır; aşağıdaki bekleme notları tarihseldir.
+
 **Sorumlu:** Hasti. **Durum:** Servis mantığı ve dört Express router işlemi hazır;
 gerçek auth, chat, PostgreSQL ve BullMQ adaptörlerine bağlanmayı bekliyor.
 Önerilen yol ve veri modeli kararları Bölüm 1'deki taslağa dayanır.
@@ -77,7 +80,8 @@ Router aktörü yeniden şema/süre kontrolünden geçirir; bu kontrol imza doğ
 
 Router kendi JSON parser'ını kullanır. Genel bir parser daha önce kurulmuşsa genel
 parser hatalarının ortak hata middleware'inde de JSON olarak karşılanması gerekir.
-Mesaj geçmişi `GET /support/sessions/:sessionId/messages` bu bölümde uygulanmadı.
+Mesaj geçmişi `GET /support/sessions/:sessionId/messages`, [Bölüm 4–5'te](support-messaging-setup.md)
+eklendi; router'a `messages` servisi verilmezse bu yol 503 döner.
 
 ## Eren: kalıcı transaction adaptörü
 
@@ -100,7 +104,7 @@ Yalnızca mevcut satıra row lock koymak, henüz olmayan iki oturumun oluşturul
 engellemez; o yarış da korunmalıdır. Aynı kurallar birden çok uygulama sürecinde geçerlidir.
 
 Bu servisin callback'lerinde dış ağ servisine yan etki yapılmaz; tekrar çalıştırılabilir.
-Gelecekteki mesaj yazımı da kabul/kapatmayla aynı oturum kilidi veya transaction
+Mesaj yazımı da kabul/kapatmayla aynı oturum kilidi veya transaction
 sıralamasına katılmalıdır. Şu anki testler SQL/Prisma transaction davranışını kanıtlamaz;
 gerçek adaptör eklendiğinde bu senaryolar PostgreSQL üzerinde tekrar doğrulanmalıdır.
 
@@ -129,7 +133,8 @@ kapatılmış/atanmış oturumu yeniden kuyruğa sokamaz. Olayların sırasız v
 teslimi mümkün kabul edilir. Outbox satırını yazmak BullMQ'ya teslim edildiği anlamına gelmez.
 
 Bu bölüm outbox arayüzünü ve ona yazan servis mantığını içerir; kalıcı tablo,
-dispatcher, BullMQ işi ve Socket.IO durum yayını henüz uygulanmadı. API 201,
+dispatcher ve BullMQ işi henüz uygulanmadı. Socket.IO durum yayını için Bölüm 4–5'te
+`publishSessionUpdate(sessionId)` eklendi; worker bu fonksiyona bağlanmalıdır. API 201,
 adaptör bağlandığında oturum ve teslim kaydı commit edildi demektir; uzman atandı demek değildir.
 
 ## Furkan: sohbet sahipliği ve AI devri
@@ -151,8 +156,8 @@ HTTP hata zarfı ve tekrar çağrıların etkisizliğini kapsar.
 
 Test deposu yalnızca `api/tests/` altındadır ve üretim build'ine dahil edilmez.
 Çalışan tam uygulama için gerçek auth/chat/DB/kuyruk adaptörleri ve ana giriş
-bağlantısı gerekir. Sonraki bölüm: yetkili Socket.IO odaları, kullanıcı–uzman
-mesajlaşması ve mesaj geçmişi.
+bağlantısı gerekir. Yetkili odalar, kullanıcı–uzman mesajlaşması, geçmiş ve genişletilmiş
+transaction arayüzü için [Bölüm 4–5'e](support-messaging-setup.md) bakın.
 
 Router ve asenkron hata yönetimi için resmi kaynaklar:
 [Express routing](https://expressjs.com/en/guide/routing/),

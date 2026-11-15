@@ -6,6 +6,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import type { StoredSupportMessage, SupportMessage } from "./message.service.js";
 
 const resourceIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
 const handoffRequestSchema = z.strictObject({ conversationId: resourceIdSchema });
@@ -52,6 +53,8 @@ const errorDefinitions = {
   NOT_FOUND: [404, "Destek oturumu veya sohbet bulunamadı."],
   SESSION_CLOSED: [409, "Bu destek görüşmesi kapanmış."],
   ALREADY_ASSIGNED: [409, "Görüşme başka bir uzmana atanmış."],
+  SESSION_NOT_ACTIVE: [409, "Mesaj göndermek için bir uzmanın görüşmeyi kabul etmesi gerekiyor."],
+  MESSAGE_ID_CONFLICT: [409, "Bu mesaj kimliği farklı bir içerikle kullanılmış."],
   SERVICE_UNAVAILABLE: [503, "Destek hizmetine şu anda ulaşılamıyor."],
   INTERNAL_ERROR: [500, "Destek işlemi tamamlanırken bir hata oluştu."],
 } as const;
@@ -93,6 +96,12 @@ export interface SupportTransaction {
   hasAgentOffer(sessionId: string, agentId: string): Promise<boolean>;
   saveSession(session: SupportSession): Promise<void>;
   appendOutbox(event: SupportOutboxEvent): Promise<void>;
+  // TR: Mesaj işlemleri de kabul/kapatma ile aynı oturum transaction'ını kullanmalıdır.
+  // EN: Message operations must share the session transaction used by acceptance/closure.
+  findMessageByClientId(sessionId: string, senderId: string, clientMessageId: string): Promise<StoredSupportMessage | null>;
+  nextMessageSequence(sessionId: string): Promise<number>;
+  saveMessage(record: StoredSupportMessage): Promise<void>;
+  listMessages(sessionId: string, afterSequence: number, limit: number): Promise<SupportMessage[]>;
 }
 
 export interface SupportStore {
@@ -162,7 +171,7 @@ function requireRole(actor: SupportActor, roles: SupportActor["role"][]): void {
 
 // TR: Yalnızca sahibi veya atanmış uzman erişebilir; diğerlerine kaynak gizlenir (404).
 // EN: Only the owner or assigned expert may access; hide the resource from others with 404.
-function requireParticipant(actor: SupportActor, session: SupportSession): void {
+export function requireParticipant(actor: SupportActor, session: SupportSession): void {
   const owner = actor.role === "user" && actor.userId === session.userId;
   const agent = actor.role === "expert" && actor.userId === session.agentId;
   if (!owner && !agent) throw new SupportServiceError("NOT_FOUND");

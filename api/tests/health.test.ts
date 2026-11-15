@@ -8,4 +8,9 @@ describe("GET /health", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ status: "ok", service: "kalkan-api" });
   });
+  it("reports unwired support explicitly", async () => {
+    const res = await request(createApp()).post("/support/handoffs").send({ conversationId: "test" });
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe("SERVICE_UNAVAILABLE");
+  });
 });

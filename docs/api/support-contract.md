@@ -1,10 +1,13 @@
 # Canlı destek sözleşmesi — Bölüm 1
 
+> Uygulamanın güncel durumu ve kalan takım bağımlılıkları:
+> [Bölüm 6–8](support-integration-setup.md).
+
 **Durum:** Ekip incelemesine açık sözleşme taslağı. Bağlantı altyapısı Bölüm 2'de
-uygulandı; Bölüm 3 devir servisini ve dört HTTP yolunu ekler. Mesajlaşma ve gerçek
-auth/DB/kuyruk entegrasyonları henüz tamamlanmadı.
+uygulandı; Bölüm 3 devir servisini ve dört HTTP yolunu ekler. Bölüm 4–5 mesajlaşma
+ve beşinci HTTP yolu olan geçmişi ekler. Gerçek auth/DB/kuyruk entegrasyonları bekleniyor.
 **Sorumlu:** Hasti (Kullanıcı-4).
-**Planlanan branch:** `feature/backend-live-support`.
+**Branch:** `feature/backend-support-integration`.
 
 Görev dağılımı PDF'sinin 2–3. sayfaları Hasti'ye Socket.IO sunucusunu,
 asistandan uzmana devir akışını ve uzman–kullanıcı mesajlaşmasını atar.
@@ -172,7 +175,7 @@ ve bağlantı kapatılır; istemci yalnızca bu olayın teslimine güvenmez.
 - Yetki kontrolünden sonra tekrar kaydı aranır. Önceden kabul edilmiş mesaj,
   oturum sonradan kapansa bile aynı sonuçla dönebilir; yeni mesaj kapalı oturumda reddedilir.
 - Maskeleme yapılırsa tekrar karşılaştırması için ham içerik saklanmaz; sunucuya
-  ait gizli anahtarla üretilen içerik HMAC'i kullanılması önerilir. Anahtar yönetimi
+  ait gizli anahtarla üretilen içerik HMAC'i kullanılır. Anahtar yönetimi
   ve maskeleme sürümü Eren ile netleştirilir; token/metin uygulama loglarına yazılmaz.
 - `sequence` oturum başına artar ve kalıcı depoda benzersizdir; arada boşluk olabilir.
   UI, ack ve yayından gelen aynı mesajı `id` ile tekilleştirir, sequence ile sıralar.
@@ -249,8 +252,9 @@ gereksinimdir; henüz Prisma migration veya çalışan kuyruk uygulanmamıştır
 - Kuyruk/depo hatasında sahte başarı dönmez; yeniden deneme kayıtları doğrulanır.
 - Kapatma/kabul/gönderim yarışları ve kapanmış oturuma geciken işler sınanır.
 
-Bu liste devir ve mesajlaşma için planlanan kabul senaryolarını da içerir; tamamı
-henüz uygulanmış değildir. Bölüm 1 sözleşme dosyalarını, [Bölüm 2](support-socket-setup.md)
-Socket.IO bağlantı modülünü ve bağlantı testlerini sağlar. [Bölüm 3](support-handoff-setup.md)
-devir servisini, dört HTTP yolunu ve transaction testlerini ekler. Paket ve TypeScript
-ayarları eklendi; ana HTTP uygulaması, gerçek auth/DB adaptörleri ve Git deposu henüz yoktur.
+Bu senaryoların servis, HTTP ve Socket.IO kontrolleri yerel testlerle doğrulanır;
+gerçek PostgreSQL/BullMQ garantileri adaptör entegrasyonunda ayrıca sınanmalıdır.
+Bölüm 1 sözleşmeyi, [Bölüm 2](support-socket-setup.md) bağlantıyı,
+[Bölüm 3](support-handoff-setup.md) devri, [Bölüm 4–5](support-messaging-setup.md)
+mesajları ve geçmişi açıklar. Ana HTTP uygulaması, gerçek auth/DB adaptörleri ve
+kuyruk worker'ı hâlâ ekip entegrasyonu gerektirir.

@@ -1,5 +1,7 @@
 # Canlı destek bağlantı altyapısı — Bölüm 2
 
+> Güncel ana sunucu/auth bağlantısı için [Bölüm 6–8](support-integration-setup.md).
+
 **Sorumlu:** Hasti. **Durum:** TypeScript modülü ve yerel bağlantı testleri hazır.
 Namespace ve mesaj adları Bölüm 1'deki önerilen sözleşmeye dayanır; ekipçe onaylanmış
 bir üretim API'si olduğu iddia edilmez.
@@ -26,10 +28,10 @@ Bu modül kendi portunu açmaz. `app.ts` ve ana `index.ts` için değişiklik ya
 - Origin listesi hem polling hem WebSocket el sıkışmasına uygulanır. Namespace `/`
   reddedilir. İstemci paketi sunucudan dağıtılmaz; giriş paketi sınırı 64 KiB'dir.
 
-Devir [Bölüm 3'te](support-handoff-setup.md) uygulandı. Kuyruk, veritabanı,
-destek odasına katılma ve mesaj gönderme bu bölümde uygulanmadı.
-`support:join` / `support:message:send` işleyicileri sonraki bölümlerde
-`registerHandlers` üzerinden bağlanacaktır. Şu an bu komutlardan başarı yanıtı beklenmez.
+Devir [Bölüm 3'te](support-handoff-setup.md), yetkili odalar ve mesajlaşma
+[Bölüm 4–5'te](support-messaging-setup.md) uygulandı. `support:join` ve
+`support:message:send`, `support: { handoff, messages }` seçeneği verilince kurulur.
+Bu seçenek yoksa yalnızca bağlantı katmanı çalışır. Gerçek kuyruk/veritabanı bekleniyor.
 
 ## Yerel kontrol
 
@@ -138,10 +140,10 @@ Origin kontrolü kimlik doğrulamanın yerine geçmez. Origin değerleri tam eş
 - Çok süreçli dağıtım için Redis adapter ve tüm süreçlere iptal bildirimi henüz yoktur.
 - IP/kullanıcı bazlı hız sınırları Amir Ali'nin gateway katmanıyla bağlanacaktır;
   paket boyutu ve auth zaman aşımı tek başına rate limiting değildir.
-- Admin bağlantısı açılabilmesi konuşma erişimi vermez. Oturum/oda/mesaj yetkileri
-  sonraki bölümde ayrı kontrol edilir. Bu aşamada hiçbir konuşma odası açılmaz.
+- Admin bağlantısı açılabilmesi konuşma erişimi vermez. Bölüm 4–5 işleyicileri
+  oturum/oda/mesaj yetkilerini ve her yayın alıcısının token'ını tekrar kontrol eder.
 - Bölüm 3'te dört HTTP yolu ve devir servisi eklendi. Gerçek DB/kuyruk ve ana
-  uygulamaya bağlantı halen beklenir. Mesaj geçmişi ve mesaj kalıcılığı sonraki bölümdedir.
+  uygulamaya bağlantı halen beklenir. Mesaj geçmişi ve kalıcılık arayüzü Bölüm 4–5'tedir.
 
 Kurulum, middleware ve Origin kontrolünde kullanılan resmi kaynaklar:
 [Socket.IO middleware](https://socket.io/docs/v4/middlewares/),
