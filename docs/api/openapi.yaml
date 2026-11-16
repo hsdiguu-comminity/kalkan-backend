@@ -567,3 +567,132 @@ x-socketio:
     support:error:
       payload:
         $ref: '#/components/schemas/SupportError'
+
+  - name: Tools
+    description: Pasif güvenlik araçlarý (dosya hash kontrolü, parola sýzýntý kontrolü vb.).
+
+  /tools/hash/check:
+    post:
+      tags: [Tools]
+      operationId: checkFileHash
+      summary: Dosya hash deðerini VirusTotal üzerinde kontrol et
+      description: Dosyanýn kendisi deðil, yalnýzca hash özeti VirusTotal API'sine sorgulanýr.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HashCheckRequest'
+      responses:
+        '200':
+          description: Hash analiz sonucu baþarýyla döndürüldü.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HashCheckResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          description: Geçersiz hash formatý veya eksik alan.
+        '502':
+          description: Dýþ tehdit istihbaratý servisi (VirusTotal) hatasý.
+        '503':
+          description: VirusTotal API yapýlandýrmasý eksik veya servis eriþilemiyor.
+
+  /tools/password/check:
+    post:
+      tags: [Tools]
+      operationId: checkPasswordLeak
+      summary: Parolanýn veri sýzýntýlarýnda yer alýp almadýðýný kontrol et
+      description: k-anonymity yöntemiyle HIBP API'si kullanýlýr; parola asla kaydedilmez.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordCheckRequest'
+      responses:
+        '200':
+          description: Parola sýzýntý analiz sonucu baþarýyla döndürüldü.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordCheckResponse'
+        '422':
+          description: Boþ veya geçersiz parola girdisi.
+        '502':
+          description: HIBP sýzýntý kontrol servisi yanýt vermedi.
+
+    RiskLevel:
+      type: string
+      enum: [low, medium, high]
+
+    HashCheckRequest:
+      type: object
+      additionalProperties: false
+      required: [hash]
+      properties:
+        hash:
+          type: string
+          minLength: 32
+          maxLength: 64
+          pattern: '^[A-Fa-f0-9]{32}$|^[A-Fa-f0-9]{40}$|^[A-Fa-f0-9]{64}$'
+
+    HashCheckResponse:
+      type: object
+      additionalProperties: false
+      required: [hash, hash_type, found, risk_level, reasons, malicious_count, suspicious_count, total_engines]
+      properties:
+        hash:
+          type: string
+        hash_type:
+          type: string
+          enum: [md5, sha1, sha256]
+        found:
+          type: boolean
+        risk_level:
+          $ref: '#/components/schemas/RiskLevel'
+        reasons:
+          type: array
+          items:
+            type: string
+        malicious_count:
+          type: integer
+          minimum: 0
+        suspicious_count:
+          type: integer
+          minimum: 0
+        total_engines:
+          type: integer
+          minimum: 0
+        file_name:
+          type: string
+          nullable: true
+
+    PasswordCheckRequest:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password:
+          type: string
+          minLength: 1
+          maxLength: 256
+          format: password
+
+    PasswordCheckResponse:
+      type: object
+      additionalProperties: false
+      required: [pwned, breach_count, risk_level, reasons]
+      properties:
+        pwned:
+          type: boolean
+        breach_count:
+          type: integer
+          minimum: 0
+        risk_level:
+          $ref: '#/components/schemas/RiskLevel'
+        reasons:
+          type: array
+          items:
+            type: string
