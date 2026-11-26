@@ -16,6 +16,8 @@ info:
 tags:
   - name: Support
     description: Asistandan uzmana devir ve canlı destek oturumları.
+  - name: TwoFactor
+    description: TOTP ile iki adımlı doğrulama (2FA) kurulumu, kapatılması ve girişte doğrulanması.
 security:
   - bearerAuth: []
 paths:
@@ -225,6 +227,147 @@ paths:
           $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /auth/2fa/setup:
+    post:
+      tags: [TwoFactor]
+      operationId: startTwoFactorSetup
+      summary: 2FA kurulumunu başlat
+      description: |
+        Oturum açmış kullanıcı için yeni bir TOTP gizli anahtarı üretir ve kurulum
+        bekleyen olarak saklar; 2FA bu çağrıyla açılmaz. Gizli anahtar veritabanında
+        şifreli tutulur ve loglanmaz. Tekrar çağrılırsa önceki bekleyen kurulum geçersiz
+        olur. Kurulum, expiresAt zamanına kadar /auth/2fa/enable ile tamamlanmalıdır.
+        İstek gövdesi yoktur.
+      responses:
+        '200':
+          description: Kurulum bilgileri; istemci otpauthUrl değerini QR kod olarak gösterir.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TwoFactorSetup'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/TwoFactorConflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /auth/2fa/enable:
+    post:
+      tags: [TwoFactor]
+      operationId: enableTwoFactor
+      summary: Doğrulama koduyla 2FA'yı aç
+      description: |
+        Kimlik doğrulama uygulamasındaki 6 haneli kod, bekleyen kurulumun gizli
+        anahtarıyla doğrulanırsa 2FA açılır. Saat kayması için ±1 zaman adımı (30 sn)
+        kabul edilir; aynı kod tekrar kullanılamaz. Hatalı denemeler hız sınırına tabidir.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TotpCodeRequest'
+            example:
+              code: '123456'
+      responses:
+        '200':
+          description: 2FA açıldı.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TwoFactorStatus'
+              example:
+                enabled: true
+        '400':
+          $ref: '#/components/responses/TwoFactorBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/TwoFactorConflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /auth/2fa/disable:
+    post:
+      tags: [TwoFactor]
+      operationId: disableTwoFactor
+      summary: Geçerli bir doğrulama koduyla 2FA'yı kapat
+      description: |
+        2FA yalnızca güncel bir TOTP koduyla kapatılabilir; ele geçirilmiş bir erişim
+        token'ı tek başına 2FA'yı kapatmaya yetmez. Başarılı kapatmada gizli anahtar silinir.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TotpCodeRequest'
+            example:
+              code: '123456'
+      responses:
+        '200':
+          description: 2FA kapatıldı.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TwoFactorStatus'
+              example:
+                enabled: false
+        '400':
+          $ref: '#/components/responses/TwoFactorBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/TwoFactorConflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /auth/2fa/verify:
+    post:
+      tags: [TwoFactor]
+      operationId: verifyTwoFactorLogin
+      summary: Girişin ikinci adımı — TOTP kodunu doğrula ve token al
+      description: |
+        2FA'sı açık kullanıcı parolasıyla giriş yaptığında /auth/login erişim token'ı
+        yerine kısa ömürlü bir challengeToken döner (Buse ile eşleştirilecek). Bu uç
+        nokta challengeToken ve TOTP kodunu doğrular, başarılıysa normal giriş
+        yanıtını döner. challengeToken tek kullanımlıktır ve en fazla 5 dakika geçerlidir.
+        Bearer token gerektirmez. Kod ve challenge hataları aynı genel mesajla
+        döner; hangi bilginin yanlış olduğu açıklanmaz.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TwoFactorVerifyRequest'
+      responses:
+        '200':
+          description: |
+            2FA doğrulandı; gövde /auth/login'in başarılı yanıtıyla aynıdır.
+            Şema Buse'nin auth sözleşmesine göre AuthTokens olarak tamamlanacak.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokens'
+        '400':
+          $ref: '#/components/responses/TwoFactorBadRequest'
+        '401':
+          $ref: '#/components/responses/TwoFactorUnauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
 components:
   securitySchemes:
     bearerAuth:
@@ -302,6 +445,31 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    TwoFactorBadRequest:
+      description: |
+        INVALID_PAYLOAD — eksik/geçersiz alan veya bozuk JSON.
+        INVALID_TOTP_CODE — kod doğru biçimde fakat geçersiz, süresi geçmiş veya daha önce kullanılmış.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AuthErrorResponse'
+    TwoFactorUnauthorized:
+      description: |
+        UNAUTHENTICATED — challengeToken veya kod geçersiz/süresi dolmuş.
+        Hangisinin hatalı olduğu istemciye açıklanmaz.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AuthErrorResponse'
+    TwoFactorConflict:
+      description: |
+        TWO_FACTOR_ALREADY_ENABLED — 2FA zaten açık.
+        TWO_FACTOR_NOT_ENABLED — 2FA açık değil.
+        TWO_FACTOR_SETUP_REQUIRED — bekleyen kurulum yok veya süresi doldu.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AuthErrorResponse'
   schemas:
     ResourceId:
       type: string
@@ -541,6 +709,98 @@ components:
             data:
               $ref: '#/components/schemas/SupportMessage'
         - $ref: '#/components/schemas/SocketErrorAck'
+    TotpCode:
+      type: string
+      pattern: '^[0-9]{6}$'
+      description: Kimlik doğrulama uygulamasının ürettiği 6 haneli kod. Loglanmaz.
+      example: '123456'
+    TotpCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          $ref: '#/components/schemas/TotpCode'
+    TwoFactorSetup:
+      type: object
+      additionalProperties: false
+      required: [secret, otpauthUrl, expiresAt]
+      properties:
+        secret:
+          type: string
+          pattern: '^[A-Z2-7]+$'
+          minLength: 32
+          maxLength: 64
+          description: |
+            Base32 gizli anahtar; QR okutulamazsa elle girmek içindir. Yalnızca bu
+            yanıtta bir kez döner, sonradan tekrar gösterilmez.
+        otpauthUrl:
+          type: string
+          description: otpauth://totp/... biçiminde, QR koda dönüştürülecek adres.
+        expiresAt:
+          type: string
+          format: date-time
+          description: Bekleyen kurulumun /auth/2fa/enable ile tamamlanması gereken son an.
+    TwoFactorStatus:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+    TwoFactorVerifyRequest:
+      type: object
+      additionalProperties: false
+      required: [challengeToken, code]
+      properties:
+        challengeToken:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: /auth/login'in 2FA gerektiğinde döndürdüğü kısa ömürlü token.
+        code:
+          $ref: '#/components/schemas/TotpCode'
+    AuthTokens:
+      type: object
+      description: |
+        YER TUTUCU — başarılı giriş yanıtı Buse'nin (Kullanıcı-1) /auth/login
+        sözleşmesinde tanımlanacak; bu şema ona referans verecek şekilde güncellenecek.
+    AuthError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - INVALID_PAYLOAD
+            - UNAUTHENTICATED
+            - FORBIDDEN
+            - INVALID_TOTP_CODE
+            - TWO_FACTOR_ALREADY_ENABLED
+            - TWO_FACTOR_NOT_ENABLED
+            - TWO_FACTOR_SETUP_REQUIRED
+            - RATE_LIMITED
+            - SERVICE_UNAVAILABLE
+            - INTERNAL_ERROR
+        message:
+          type: string
+          minLength: 1
+          description: Türkçe kullanıcı mesajı; kod, gizli anahtar veya token içermez.
+        retryAfterSeconds:
+          type: integer
+          minimum: 1
+          description: RATE_LIMITED hatasında zorunlu; HTTP Retry-After ile aynı değer.
+      example:
+        code: INVALID_TOTP_CODE
+        message: Doğrulama kodu geçersiz veya süresi dolmuş.
+    AuthErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/AuthError'
 x-socketio:
   description: Bu özel uzantı Socket.IO taslağıdır; OpenAPI HTTP paths içinde WebSocket tanımlamaz.
   namespace: /support
