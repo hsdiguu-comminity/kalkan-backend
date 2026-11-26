@@ -1,7 +1,5 @@
-/**
- * Amir Ali — Ortam değişkenlerini uygulama başlarken Zod ile doğrular.
- * Hata mesajları yalnızca değişken adlarını içerir; değerler (gizli anahtarlar) asla yazılmaz.
- */
+// Amir Ali — Ortam değişkenleri. Hata mesajları yalnızca değişken adlarını içerir;
+// değerler (gizli anahtarlar) asla yazılmaz.
 import { z } from "zod";
 
 export type NodeEnv = "development" | "test" | "production";
@@ -9,22 +7,16 @@ export type NodeEnv = "development" | "test" | "production";
 export interface AppConfig {
   readonly nodeEnv: NodeEnv;
   readonly port: number;
-  /**
-   * İzin verilen tarayıcı origin'leri. null: tanımlı değil (yalnızca geliştirme/test).
-   */
+  /** null yalnızca geliştirme/testte olabilir; üretimde CORS_ORIGIN zorunludur. */
   readonly corsOrigins: readonly string[] | null;
   readonly databaseUrl: string | null;
   readonly redisUrl: string | null;
-  /** JWT imzalama anahtarı; Buse'nin lib/jwt.ts dosyası kullanır. */
+  /** Henüz kullanılmıyor; Buse'nin lib/jwt.ts dosyası hazır olduğunda kullanılacak. */
   readonly jwtSecret: string | null;
-  /** 2FA gizli anahtarlarını şifreleyen 32 baytlık AES-256 anahtarı (totp.service.ts). */
   readonly totpEncryptionKey: Buffer | null;
   readonly services: Readonly<{ ai: string; data: string; tools: string }>;
 }
 
-/**
- * Eksik/geçersiz değişkenlerin yalnızca adlarını taşır.
- */
 export class EnvValidationError extends Error {
   constructor(readonly variables: readonly string[]) {
     super(`Geçersiz veya eksik ortam değişkenleri: ${variables.join(", ")}`);
@@ -32,14 +24,13 @@ export class EnvValidationError extends Error {
   }
 }
 
-// Yerel geliştirmede servis adresleri (README ve docker-compose portları).
+// Yalnızca geliştirme/test varsayılanları; portlar README'deki yerel kurulumla aynıdır.
 const DEV_SERVICE_URLS = {
   ai: "http://localhost:8002",
   data: "http://localhost:8003",
   tools: "http://localhost:8001",
 } as const;
 
-// Üretimde boş bırakılamayan değişkenler.
 const REQUIRED_IN_PRODUCTION = [
   "CORS_ORIGIN",
   "DATABASE_URL",
@@ -70,8 +61,7 @@ function urlWithProtocols(protocols: readonly string[]) {
   });
 }
 
-// Base64 ile yazılmış ve tam 32 bayta çözülen anahtar.
-// Üretmek için: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+// Anahtar üretmek için: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 function isBase64Key(value: string): boolean {
   return /^[A-Za-z0-9+/]+={0,2}$/.test(value) && Buffer.from(value, "base64").length === 32;
 }
@@ -103,11 +93,6 @@ const envSchema = z.object({
   TOOLS_SERVICE_URL: optional(urlWithProtocols(["http:", "https:"])),
 });
 
-/**
- * Ortam değişkenlerini okur, doğrular ve dondurulmuş yapılandırma döndürür.
- * Uygulama girişinde (index.ts) bir kez çağrılır; testlerde kaynak verilebilir.
- * @throws {EnvValidationError} Eksik veya geçersiz değişken varsa.
- */
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.safeParse(source);
   if (!parsed.success) {

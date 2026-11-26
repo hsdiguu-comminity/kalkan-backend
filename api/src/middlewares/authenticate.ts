@@ -1,10 +1,6 @@
-/**
- * Amir Ali — Bearer token ile kimlik doğrulama middleware'i.
- * Token'ın imzası, issuer/audience, süresi ve iptal durumu bu dosyada değil, auth ekibinin
- * (Buse, lib/jwt.ts) sağladığı verifyAccessToken adaptöründe doğrulanır. Bu dosya token'ı
- * istekten güvenli biçimde alır, adaptörü süre sınırıyla çağırır ve sonucu şemaya göre kontrol eder.
- * Aynı adaptör Socket.IO sunucusunda (sockets/index.ts) da kullanılır.
- */
+// Amir Ali — Bearer token ile kimlik doğrulama. Token'ın imzası, süresi ve iptali burada değil,
+// Buse'nin verifyAccessToken adaptöründe doğrulanır; o hazır olana kadar bu middleware
+// hiçbir yola bağlı değildir.
 import type { Request, RequestHandler } from "express";
 import { z } from "zod";
 import { AppError } from "./errorHandler.js";
@@ -16,13 +12,13 @@ const principalSchema = z.strictObject({
   expiresAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 });
 
-/** Doğrulanmış kullanıcı. Kimlik ve rol yalnızca buradan alınır; body/query'ye güvenilmez. */
+/** Kimlik ve rol yalnızca buradan alınır; body/query'deki değerlere asla güvenilmez. */
 export type Principal = Readonly<z.infer<typeof principalSchema>>;
 export type Role = Principal["role"];
 
 /**
- * Auth ekibinin adaptörü. Geçersiz, süresi dolmuş veya iptal edilmiş token için null döner;
- * altyapı hatasında throw eder. signal iptal edildiğinde işlemi durdurmalıdır.
+ * Buse'nin sağlayacağı adaptörle anlaşılan imza (Hasti'nin Socket.IO sunucusu da aynısını bekler):
+ * geçersiz/süresi dolmuş/iptal edilmiş token'da null döner, altyapı hatasında throw eder.
  */
 export type AccessTokenVerifier = (
   token: string,
@@ -31,19 +27,14 @@ export type AccessTokenVerifier = (
 
 export interface AuthenticationOptions {
   verifyAccessToken: AccessTokenVerifier;
-  /** Adaptör bu süreden uzun sürerse 503 SERVICE_UNAVAILABLE döner. Varsayılan 5000 ms. */
+  /** Aşılırsa 503 SERVICE_UNAVAILABLE döner ve signal iptal edilir. */
   timeoutMs?: number;
-  /** Testler için saat. */
   now?: () => number;
 }
 
 export interface Authentication {
-  /** Geçerli Bearer token zorunludur; yoksa 401 UNAUTHENTICATED. */
   authenticate: RequestHandler;
-  /**
-   * Hasti'nin destek router'ı için: doğrulanmış kullanıcıyı, token yoksa veya geçersizse null döner.
-   * Altyapı hatasında throw eder. Aynı istekte adaptör yalnızca bir kez çağrılır.
-   */
+  /** Hasti'nin destek router'ının beklediği imza: token yoksa veya geçersizse null döner. */
   resolvePrincipal: (request: Request) => Promise<Principal | null>;
 }
 
@@ -53,10 +44,7 @@ const DEFAULT_TIMEOUT_MS = 5000;
 // İstek nesnesine bağlı doğrulama sonucu; istek bitince çöp toplayıcı temizler.
 const principals = new WeakMap<Request, Principal | null>();
 
-/**
- * authenticate middleware'inden sonra çalışan işleyicilerde kullanıcıyı verir.
- * Middleware çalışmadıysa 401 fırlatır; böylece unutulan bir authenticate sessizce geçmez.
- */
+// authenticate çalışmadıysa 401 fırlatır; böylece unutulan bir authenticate sessizce geçmez.
 export function getPrincipal(request: Request): Principal {
   const principal = principals.get(request);
   if (!principal) throw new AppError("UNAUTHENTICATED");

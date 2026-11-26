@@ -1,36 +1,27 @@
-/**
- * Amir Ali — İstek sınırlama (rate limiting) middleware'i.
- * Sabit pencere (fixed window) yöntemi: her anahtar için bir zaman penceresinde en fazla
- * `limit` istek kabul edilir; aşılırsa 429 RATE_LIMITED ve Retry-After döner.
- * Varsayılan depo bellek içidir ve yalnızca tek süreçte doğru sayar. Birden fazla API kopyası
- * çalıştırıldığında Redis tabanlı bir RateLimitStore verilmelidir (REDIS_URL hazır olduğunda).
- */
+// Amir Ali — İstek sınırlama (sabit pencere). Uyarı: varsayılan bellek içi depo yalnızca tek
+// süreçte doğru sayar; birden fazla API kopyası çalışırsa Redis tabanlı bir RateLimitStore
+// gerekir (Redis henüz kurulmadı).
 import type { Request, RequestHandler } from "express";
 import { getPrincipal } from "./authenticate.js";
 import { AppError } from "./errorHandler.js";
 
 export interface RateLimitHit {
-  /** Bu penceredeki istek sayısı (bu istek dahil). */
+  /** Bu istek dahil. */
   count: number;
-  /** Pencerenin bittiği an (Unix milisaniyesi). */
+  /** Unix milisaniyesi. */
   resetAt: number;
 }
 
-/** Sayaç deposu. Redis adaptörü aynı arayüzü uygulayarak bellek deposunun yerine geçer. */
 export interface RateLimitStore {
   increment(key: string, windowMs: number, now: number): Promise<RateLimitHit>;
 }
 
-/** İsteği kime sayacağımızı belirler (IP, kullanıcı vb.). */
 export type RateLimitKey = (request: Request) => string;
 
-/** İstemci IP adresine göre sayar. Proxy arkasında doğru IP için app.set("trust proxy") gerekir. */
+// Proxy arkasında app.set("trust proxy") ayarlanmazsa tüm kullanıcılar proxy'nin IP'si sayılır.
 export const byIp: RateLimitKey = (request) => `ip:${request.ip ?? "bilinmiyor"}`;
 
-/**
- * Giriş yapılmışsa kullanıcıya, yapılmamışsa IP adresine göre sayar.
- * Kullanıcıya göre saymak için authenticate bu middleware'den önce çalışmalıdır.
- */
+// Kullanıcıya göre sayması için authenticate bu middleware'den önce çalışmalıdır; yoksa IP'ye düşer.
 export const byUserOrIp: RateLimitKey = (request) => {
   try {
     return `user:${getPrincipal(request).userId}`;
@@ -40,24 +31,17 @@ export const byUserOrIp: RateLimitKey = (request) => {
 };
 
 export interface RateLimitOptions {
-  /** Sınırlayıcının adı; farklı sınırlayıcıların sayaçları karışmasın diye anahtara eklenir. */
+  /** Anahtara eklenir; aynı depoyu paylaşan sınırlayıcıların sayaçları karışmasın diye. */
   name: string;
-  /** Pencere başına izin verilen istek sayısı. */
   limit: number;
-  /** Pencere süresi (milisaniye). */
   windowMs: number;
-  /** Varsayılan: byIp. */
   key?: RateLimitKey;
-  /** Varsayılan: bellek içi depo (her sınırlayıcıya ayrı). */
+  /** Verilmezse her sınırlayıcının kendi bellek deposu olur. */
   store?: RateLimitStore;
-  /** Testler için saat. */
   now?: () => number;
 }
 
-/**
- * Bellek içi sayaç deposu. Süresi dolan kayıtlar zamanlayıcı kullanmadan, istek geldikçe
- * en fazla pencere başına bir kez temizlenir; böylece süreç açık kalmaya zorlanmaz.
- */
+// Temizlik zamanlayıcıyla değil istek geldikçe yapılır; zamanlayıcı süreci açık kalmaya zorlardı.
 export function createMemoryStore(): RateLimitStore {
   const hits = new Map<string, RateLimitHit>();
   let nextSweepAt = 0;
@@ -82,15 +66,7 @@ export function createMemoryStore(): RateLimitStore {
   };
 }
 
-/**
- * Sınırlayıcı middleware üretir. Yanıta RateLimit-Limit, RateLimit-Remaining ve
- * RateLimit-Reset (saniye) başlıklarını ekler. Depo hata verirse istek geçirilmez (503):
- * 2FA gibi hassas uç noktalarda sınırın sessizce kalkmasını önlemek için.
- *
- * @example
- * app.use(createRateLimit({ name: "genel", limit: 300, windowMs: 60_000 }));
- * router.post("/2fa/verify", createRateLimit({ name: "2fa-dogrulama", limit: 5, windowMs: 5 * 60_000 }), handler);
- */
+// Depo hata verirse istek geçirilmez (503): 2FA gibi hassas uç noktalarda sınır sessizce kalkmasın.
 export function createRateLimit(options: RateLimitOptions): RequestHandler {
   if (!Number.isInteger(options.limit) || options.limit < 1) {
     throw new RangeError("Rate limit: limit en az 1 olan bir tam sayı olmalıdır.");

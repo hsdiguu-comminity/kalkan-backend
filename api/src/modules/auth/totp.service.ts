@@ -1,10 +1,5 @@
-/**
- * Amir Ali — TOTP ile iki adımlı doğrulama (2FA), RFC 6238.
- * Kod üretimi ve doğrulaması Node'un yerleşik crypto modülüyle yapılır; ek kütüphane yoktur.
- * Gizli anahtarlar veritabanına AES-256-GCM ile şifrelenmiş olarak yazılır; düz hali loglanmaz.
- * Kalıcı depo (TwoFactorStore) Eren'in Prisma şeması hazır olduğunda uygulanır.
- * HTTP yolları Buse'nin auth.routes.ts dosyasında bu servisi çağırır (docs/api/openapi.yaml).
- */
+// Amir Ali — TOTP ile 2FA (RFC 6238). Henüz kullanılmıyor: kalıcı depo (TwoFactorStore) Eren'in
+// Prisma şemasını, HTTP yolları Buse'nin auth.routes.ts dosyasını bekliyor.
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { AppError } from "../../middlewares/errorHandler.js";
 
@@ -19,25 +14,22 @@ const CODE_PATTERN = /^[0-9]{6}$/;
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const CIPHER_PREFIX = "v1:";
 
-/** Kullanıcının 2FA kaydı. Gizli anahtarlar yalnızca şifreli halde tutulur. */
+/** secret ve pendingSecret yalnızca şifreli halde tutulur; düz hali asla depoya yazılmaz. */
 export interface TwoFactorRecord {
   enabled: boolean;
-  /** Açık 2FA'nın şifreli gizli anahtarı. */
   secret: string | null;
-  /** Kurulumu bekleyen şifreli gizli anahtar. */
   pendingSecret: string | null;
-  /** Bekleyen kurulumun son geçerlilik anı (Unix milisaniyesi). */
+  /** Unix milisaniyesi. */
   pendingExpiresAt: number | null;
-  /** Son kabul edilen kodun zaman adımı; aynı kodun tekrar kullanılmasını engeller. */
+  /** Aynı kodun tekrar kullanılmasını engeller. */
   lastUsedStep: number | null;
-  /** Eşzamanlı yazmaları ayırt etmek için her kayıtta artan sürüm. */
   version: number;
 }
 
 /**
- * Kalıcı depo (Eren, Prisma). save atomik olmalıdır: kayıt hâlâ expectedVersion sürümündeyse
- * (yeni kayıtta null: kayıt yoksa) yazar ve true döner; araya başka bir yazma girdiyse false döner.
- * Böylece aynı kodla eşzamanlı iki istekten yalnızca biri kabul edilir.
+ * Eren'in uygulayacağı depo. save atomik olmalıdır: kayıt hâlâ expectedVersion sürümündeyse
+ * (yeni kayıtta null) yazıp true, araya başka yazma girdiyse false döner. Bu yapılmazsa
+ * aynı kod eşzamanlı iki istekte iki kez kabul edilebilir.
  */
 export interface TwoFactorStore {
   find(userId: string): Promise<TwoFactorRecord | null>;
@@ -46,30 +38,23 @@ export interface TwoFactorStore {
 
 export interface TotpServiceOptions {
   store: TwoFactorStore;
-  /** 32 baytlık AES-256 anahtarı (TOTP_ENCRYPTION_KEY). */
   encryptionKey: Buffer;
-  /** Testler için saat. */
   now?: () => number;
 }
 
 export interface TwoFactorSetup {
-  /** Base32 gizli anahtar; yalnızca bu yanıtta bir kez gösterilir. */
+  /** Yalnızca bu yanıtta bir kez gösterilir; sonradan tekrar alınamaz. */
   secret: string;
   otpauthUrl: string;
-  /** ISO 8601 zaman damgası. */
   expiresAt: string;
 }
 
 export interface TotpService {
   isEnabled(userId: string): Promise<boolean>;
-  /** accountLabel kimlik doğrulama uygulamasında görünen ad (ör. e-posta). */
   startSetup(userId: string, accountLabel: string): Promise<TwoFactorSetup>;
   enable(userId: string, code: string): Promise<void>;
   disable(userId: string, code: string): Promise<void>;
-  /**
-   * Girişin ikinci adımı (Buse'nin /auth/2fa/verify yolu). Kod geçerliyse true döner.
-   * Hangi bilginin yanlış olduğu istemciye açıklanmasın diye hata fırlatmaz.
-   */
+  /** Hata fırlatmaz: girişte hangi bilginin yanlış olduğu istemciye açıklanmamalıdır. */
   verifyLogin(userId: string, code: string): Promise<boolean>;
 }
 
@@ -89,7 +74,6 @@ export function encodeBase32(data: Buffer): string {
   return output;
 }
 
-/** Belirli bir zaman adımı için RFC 6238 / RFC 4226 kodu üretir (HMAC-SHA1, 6 hane). */
 export function generateTotp(secret: Buffer, step: number): string {
   const counter = Buffer.alloc(8);
   counter.writeBigUInt64BE(BigInt(step));
@@ -107,10 +91,7 @@ function codesEqual(a: string, b: string): boolean {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-/**
- * Kodu ±1 adım içinde arar; lastUsedStep ve öncesindeki adımlar kabul edilmez (tekrar kullanım).
- * Eşleşen adımı, yoksa null döner.
- */
+// lastUsedStep ve öncesindeki adımlar reddedilir: aynı kod iki kez kullanılamaz.
 function matchStep(secret: Buffer, code: string, now: number, lastUsedStep: number | null): number | null {
   if (!CODE_PATTERN.test(code)) return null;
   const current = timeStep(now);

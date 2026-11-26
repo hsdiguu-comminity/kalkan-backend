@@ -11,7 +11,7 @@ export const GLOBAL_RATE_LIMIT = { limit: 300, windowMs: 60_000 } as const;
 
 // Express uygulaması. Modüller (auth, chat, support, tools, reports, stats, academy)
 // kendi router'larını burada /api altında kaydeder; middleware'ler api/src/middlewares/ altındadır.
-// Yapılandırma verilmezse ortam değişkenlerinden okunur (testlerde geliştirme varsayılanları).
+// config varsayılanı, parametresiz createApp() çağıran mevcut testler (health.test.ts) içindir.
 export function createApp(config: AppConfig = loadEnv()): Express {
   const app = express();
 
@@ -30,6 +30,9 @@ export function createApp(config: AppConfig = loadEnv()): Express {
   app.use(express.json({ limit: "1mb" }));
 
   // Örnek: app.use("/api/auth", authRouter);
+  // Henüz bağlı değil: authenticate (Buse'nin verifyAccessToken'ını bekliyor) ve Hasti'nin destek
+  // router'ı. Destek router'ı express.json'dan ÖNCE bağlanmalıdır; yoksa gövde burada ayrıştırılır
+  // ve router'ın kendi 8 KB sınırı devre dışı kalır.
 
   // Bu iki satır her zaman en sonda kalmalıdır: önce eşleşmeyen yollar, sonra ortak hata işleyici.
   app.use(notFoundHandler);

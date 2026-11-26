@@ -1,11 +1,9 @@
-/**
- * Amir Ali — Ortak hata yönetimi: her hatayı { error: { code, message } } JSON zarfına çevirir.
- * İstemciye stack trace, ham hata mesajı veya kullanıcı girdisi gönderilmez.
- */
+// Amir Ali — Ortak hata yönetimi. İstemciye stack trace, ham hata mesajı veya kullanıcı
+// girdisi gönderilmez.
 import type { ErrorRequestHandler, RequestHandler } from "express";
 import { ZodError } from "zod";
 
-// Kod -> [HTTP durumu, Türkçe kullanıcı mesajı]. Kodlar docs/api/openapi.yaml ile aynıdır.
+// Kodlar docs/api/openapi.yaml ile aynı tutulmalıdır.
 const errorDefinitions = {
   INVALID_PAYLOAD: [400, "İstek geçersiz. Lütfen gönderdiğiniz bilgileri kontrol edin."],
   INVALID_TOTP_CODE: [400, "Doğrulama kodu geçersiz veya süresi dolmuş."],
@@ -29,16 +27,13 @@ export interface AppErrorBody {
 }
 
 export interface AppErrorOptions {
-  /** Yalnızca RATE_LIMITED için; saniye, en az 1. */
+  /** Yalnızca RATE_LIMITED için kullanılır; diğer kodlarda yok sayılır. */
   retryAfterSeconds?: number;
-  /** Sunucu loglarında görünür; istemciye gönderilmez. */
+  /** Yalnızca sunucu loglarında görünür; istemciye gönderilmez. */
   cause?: unknown;
 }
 
-/**
- * Modüllerin fırlatacağı ortak hata. Mesaj koddan gelir; serbest metin kabul edilmez
- * ki kullanıcı girdisi veya iç ayrıntı istemciye sızmasın.
- */
+// Mesaj serbest metin değil, koddan gelir: kullanıcı girdisi veya iç ayrıntı istemciye sızmasın.
 export class AppError extends Error {
   readonly status: number;
   readonly retryAfterSeconds: number | undefined;
@@ -64,7 +59,7 @@ function normalizeRetryAfter(seconds: number | undefined): number {
   return seconds !== undefined && Number.isFinite(seconds) ? Math.max(1, Math.ceil(seconds)) : 1;
 }
 
-// express.json() (body-parser) hata türleri; hepsi 400 INVALID_PAYLOAD olur (sözleşme).
+// Sözleşme gereği bozuk JSON, büyük gövde vb. ayrıştırma hatalarının hepsi 400 INVALID_PAYLOAD olur.
 const PARSER_ERROR_TYPES = new Set([
   "entity.parse.failed",
   "entity.too.large",
@@ -88,15 +83,11 @@ function toAppError(error: unknown): AppError {
 }
 
 export interface ErrorHandlerOptions {
-  /**
-   * 5xx hatalarını loglar. Varsayılan console.error; istek gövdesi loglanmaz.
-   */
+  /** Yalnızca 5xx hataları loglanır; istek gövdesi (kişisel veri olabilir) asla loglanmaz. */
   log?: (error: unknown) => void;
 }
 
-/**
- * app.ts içinde tüm router'lardan sonra en son middleware olarak bağlanır.
- */
+// Tüm router'lardan sonra en son middleware olarak bağlanmalıdır; yoksa hataları yakalayamaz.
 export function createErrorHandler(options: ErrorHandlerOptions = {}): ErrorRequestHandler {
   const log = options.log ?? ((error: unknown) => console.error("[errorHandler]", error));
 
@@ -118,9 +109,6 @@ export function createErrorHandler(options: ErrorHandlerOptions = {}): ErrorRequ
   };
 }
 
-/**
- * Hiçbir yolla eşleşmeyen istekler için 404 NOT_FOUND; hata işleyiciden hemen önce bağlanır.
- */
 export const notFoundHandler: RequestHandler = (_request, _response, next) => {
   next(new AppError("NOT_FOUND"));
 };
