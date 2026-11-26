@@ -17,6 +17,8 @@ export interface AppConfig {
   readonly redisUrl: string | null;
   /** JWT imzalama anahtarı; Buse'nin lib/jwt.ts dosyası kullanır. */
   readonly jwtSecret: string | null;
+  /** 2FA gizli anahtarlarını şifreleyen 32 baytlık AES-256 anahtarı (totp.service.ts). */
+  readonly totpEncryptionKey: Buffer | null;
   readonly services: Readonly<{ ai: string; data: string; tools: string }>;
 }
 
@@ -43,6 +45,7 @@ const REQUIRED_IN_PRODUCTION = [
   "DATABASE_URL",
   "REDIS_URL",
   "JWT_SECRET",
+  "TOTP_ENCRYPTION_KEY",
   "AI_SERVICE_URL",
   "DATA_SERVICE_URL",
   "TOOLS_SERVICE_URL",
@@ -67,6 +70,12 @@ function urlWithProtocols(protocols: readonly string[]) {
   });
 }
 
+// Base64 ile yazılmış ve tam 32 bayta çözülen anahtar.
+// Üretmek için: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+function isBase64Key(value: string): boolean {
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(value) && Buffer.from(value, "base64").length === 32;
+}
+
 function isOrigin(value: string): boolean {
   try {
     const url = new URL(value);
@@ -88,6 +97,7 @@ const envSchema = z.object({
   DATABASE_URL: optional(urlWithProtocols(["postgresql:", "postgres:"])),
   REDIS_URL: optional(urlWithProtocols(["redis:", "rediss:"])),
   JWT_SECRET: optional(z.string().min(32)),
+  TOTP_ENCRYPTION_KEY: optional(z.string().refine(isBase64Key)),
   AI_SERVICE_URL: optional(urlWithProtocols(["http:", "https:"])),
   DATA_SERVICE_URL: optional(urlWithProtocols(["http:", "https:"])),
   TOOLS_SERVICE_URL: optional(urlWithProtocols(["http:", "https:"])),
@@ -122,6 +132,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppConfig {
     databaseUrl: env.DATABASE_URL ?? null,
     redisUrl: env.REDIS_URL ?? null,
     jwtSecret: env.JWT_SECRET ?? null,
+    totpEncryptionKey: env.TOTP_ENCRYPTION_KEY === undefined
+      ? null
+      : Buffer.from(env.TOTP_ENCRYPTION_KEY, "base64"),
     services: Object.freeze({
       ai: env.AI_SERVICE_URL ?? DEV_SERVICE_URLS.ai,
       data: env.DATA_SERVICE_URL ?? DEV_SERVICE_URLS.data,

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { EnvValidationError, loadEnv } from "../../src/config/env.js";
 
 const TEST_SECRET = "test-secret-0123456789-abcdefghijkl";
+// 32 bayt (0x01 tekrarı), yalnızca test değeri.
+const TEST_TOTP_KEY = Buffer.alloc(32, 1).toString("base64");
 
 const productionEnv = {
   NODE_ENV: "production",
@@ -11,6 +13,7 @@ const productionEnv = {
   DATABASE_URL: "postgresql://user:pass@db:5432/kalkan",
   REDIS_URL: "redis://redis:6379",
   JWT_SECRET: TEST_SECRET,
+  TOTP_ENCRYPTION_KEY: TEST_TOTP_KEY,
   AI_SERVICE_URL: "http://ai:8002",
   DATA_SERVICE_URL: "http://data:8003",
   TOOLS_SERVICE_URL: "http://tools:8001",
@@ -36,6 +39,7 @@ describe("loadEnv", () => {
       databaseUrl: null,
       redisUrl: null,
       jwtSecret: null,
+      totpEncryptionKey: null,
       services: {
         ai: "http://localhost:8002",
         data: "http://localhost:8003",
@@ -60,6 +64,14 @@ describe("loadEnv", () => {
     expect(config.port).toBe(8080);
     expect(config.corsOrigins).toEqual(["https://kalkan.example", "https://admin.kalkan.example"]);
     expect(config.services.tools).toBe("http://tools:8001");
+    expect(config.totpEncryptionKey).toEqual(Buffer.alloc(32, 1));
+  });
+
+  it("32 bayta çözülmeyen TOTP_ENCRYPTION_KEY reddedilir", () => {
+    const shortKey = Buffer.alloc(16, 1).toString("base64");
+    expect(captureError({ TOTP_ENCRYPTION_KEY: shortKey }).variables).toEqual(["TOTP_ENCRYPTION_KEY"]);
+    expect(captureError({ TOTP_ENCRYPTION_KEY: "base64-degil!" }).variables)
+      .toEqual(["TOTP_ENCRYPTION_KEY"]);
   });
 
   it("üretimde eksik değişkenlerin adlarını listeler", () => {
@@ -68,6 +80,7 @@ describe("loadEnv", () => {
       "CORS_ORIGIN",
       "DATABASE_URL",
       "REDIS_URL",
+      "TOTP_ENCRYPTION_KEY",
       "AI_SERVICE_URL",
       "DATA_SERVICE_URL",
       "TOOLS_SERVICE_URL",
